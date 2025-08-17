@@ -1,4 +1,0 @@
-flask==2.3.3
-TTS==0.20.6
-torch==2.1.0
-torchaudio==2.1.0

@@ -1,199 +1,57 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+
 <head>
-    <title>AI Voice Assistant</title>
+    <meta charset="UTF-8">
+    <title>Real-Time AI Assistant</title>
     <style>
-        body { font-family: Arial; text-align: center; padding: 50px; }
-        #recordBtn { padding: 20px 40px; font-size: 18px; margin: 20px; }
-        #status { margin: 20px; font-size: 16px; }
-        .recording { background-color: #ff4444; color: white; }
-        .idle { background-color: #4CAF50; color: white; }
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 50px;
+            background-color: #f0f2f5;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        button {
+            padding: 15px 25px;
+            margin: 10px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        button#stop {
+            background-color: #f44336;
+        }
+
+        audio {
+            margin-top: 20px;
+            width: 80%;
+        }
+
+        #status {
+            margin-top: 15px;
+            font-weight: bold;
+            color: #555;
+        }
     </style>
 </head>
+
 <body>
-    <h1>Real-Time AI Voice Assistant</h1>
-    <button id="connectBtn" class="idle">Connect</button>
-    <button id="disconnectBtn" class="idle" style="display:none;">Disconnect</button>
-    <div id="status">Ready</div>
-    <div id="transcript"></div>
-    
-    <script>
-        const ws = new WebSocket('ws://localhost:3000');
-        const connectBtn = document.getElementById('connectBtn');
-        const disconnectBtn = document.getElementById('disconnectBtn');
-        const status = document.getElementById('status');
-        const transcript = document.getElementById('transcript');
-        
-        let mediaRecorder;
-        let isConnected = false;
-        let audioBuffer = [];
-        let silenceTimer;
-        let voiceDetected = false;
-        
-        // Connect/Disconnect buttons
-        connectBtn.addEventListener('click', connect);
-        disconnectBtn.addEventListener('click', disconnect);
-        
-        function connect() {
-            navigator.mediaDevices.getUserMedia({ audio: true })
-                .then(stream => {
-                    mediaRecorder = new MediaRecorder(stream, {
-                        mimeType: 'audio/webm;codecs=opus'
-                    });
-                    
-                    mediaRecorder.ondataavailable = event => {
-                        if (event.data.size > 0 && isConnected) {
-                            const reader = new FileReader();
-                            reader.onload = () => {
-                                const base64 = reader.result.split(',')[1];
-                                
-                                // Check for voice activity
-                                checkVoiceActivity(base64);
-                                
-                                if (voiceDetected) {
-                                    audioBuffer.push(base64);
-                                    clearTimeout(silenceTimer);
-                                    
-                                    // Set silence timer (2 seconds of silence ends recording)
-                                    silenceTimer = setTimeout(() => {
-                                        if (audioBuffer.length > 0) {
-                                            processAudio();
-                                        }
-                                    }, 2000);
-                                }
-                            };
-                            reader.readAsDataURL(event.data);
-                        }
-                    };
-                    
-                    // Start continuous recording
-                    isConnected = true;
-                    mediaRecorder.start(200);
-                    
-                    connectBtn.style.display = 'none';
-                    disconnectBtn.style.display = 'inline-block';
-                    status.textContent = 'Connected - Listening for voice...';
-                })
-                .catch(err => {
-                    status.textContent = 'Microphone access denied';
-                });
-        }
-        
-        function disconnect() {
-            isConnected = false;
-            
-            if (mediaRecorder && mediaRecorder.state === 'recording') {
-                mediaRecorder.stop();
-            }
-            
-            clearTimeout(silenceTimer);
-            audioBuffer = [];
-            
-            connectBtn.style.display = 'inline-block';
-            disconnectBtn.style.display = 'none';
-            status.textContent = 'Disconnected';
-        }
-        
-        function checkVoiceActivity(audioData) {
-            // Simple energy-based voice detection (client-side)
-            const buffer = Uint8Array.from(atob(audioData), c => c.charCodeAt(0));
-            let sum = 0;
-            for (let i = 0; i < buffer.length; i++) {
-                sum += Math.abs(buffer[i] - 128);
-            }
-            const energy = sum / buffer.length;
-            
-            voiceDetected = energy > 10; // Threshold - adjust as needed
-            
-            if (voiceDetected && status.textContent === 'Listening for voice...') {
-                status.textContent = 'Voice detected - Recording...';
-            }
-        }
-        
-        function processAudio() {
-            const combinedAudio = audioBuffer.join('');
-            audioBuffer = [];
-            voiceDetected = false;
-            
-            status.textContent = 'Processing speech...';
-            
-            ws.send(JSON.stringify({
-                type: 'audio_chunk',
-                data: combinedAudio
-            }));
-            
-            ws.send(JSON.stringify({ type: 'audio_end' }));
-        }
-        
-        // WebSocket events
-        ws.onmessage = (event) => {
-            const message = JSON.parse(event.data);
-            
-            if (message.type === 'transcript') {
-                transcript.textContent = 'You: ' + message.text;
-            } else if (message.type === 'audio_response') {
-                const audio = new Audio('data:audio/wav;base64,' + message.data);
-                audio.play();
-                status.textContent = 'AI Speaking...';
-                
-                audio.onended = () => {
-                    status.textContent = 'Ready';
-                };
-            } else if (message.type === 'error') {
-                status.textContent = 'Error: ' + message.message;
-            }
-        };
-        
-        ws.onopen = () => console.log('WebSocket connected');
-        ws.onclose = () => {
-            if (isConnected) {
-                status.textContent = 'Connection lost - Reconnecting...';
-                // Auto-reconnect
-                setTimeout(() => {
-                    if (isConnected) {
-                        ws = new WebSocket('ws://localhost:3000');
-                        setupWebSocket();
-                    }
-                }, 2000);
-            }
-        };
-        
-        function setupWebSocket() {
-            ws.onmessage = (event) => {
-                const message = JSON.parse(event.data);
-                
-                if (message.type === 'transcript') {
-                    transcript.textContent = 'You: ' + message.text;
-                } else if (message.type === 'audio_response') {
-                    const audio = new Audio('data:audio/wav;base64,' + message.data);
-                    audio.play();
-                    status.textContent = 'AI Speaking...';
-                    
-                    audio.onended = () => {
-                        if (isConnected) {
-                            status.textContent = 'Connected - Listening for voice...';
-                        }
-                    };
-                } else if (message.type === 'error') {
-                    status.textContent = 'Error: ' + message.message;
-                }
-            };
-            
-            ws.onopen = () => console.log('WebSocket connected');
-            ws.onclose = () => {
-                if (isConnected) {
-                    status.textContent = 'Connection lost - Reconnecting...';
-                    setTimeout(() => {
-                        if (isConnected) {
-                            ws = new WebSocket('ws://localhost:3000');
-                            setupWebSocket();
-                        }
-                    }, 2000);
-                }
-            };
-        }
-        
-        setupWebSocket();
-    </script>
+    <h1>Real-Time Voice Assistant</h1>
+    <button id="start">Start</button>
+    <button id="stop" disabled>Stop</button>
+    <div id="status">Status: Idle</div>
+    <audio id="output" controls autoplay></audio>
+
+    <script src="script.js"></script>
 </body>
+
 </html>
